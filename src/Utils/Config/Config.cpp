@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "OSTPlatform/include/Http.h"
 #include "Utils/Logging/Log.h"
 #include "Utils/SteamMetadata/ManifestClient.h"
 
@@ -61,6 +62,7 @@ namespace {
         injectLibraryX64       = snapshot.injection.libraryX64;
         cloudEnabled           = snapshot.cloud.enabled;
         cloudLibrary           = snapshot.cloud.library;
+        OSTPlatform::Http::SetProxy(snapshot.proxy.url, snapshot.proxy.bypass);
     }
 
     void ApplyManifestProvider(const std::string& provider) {
