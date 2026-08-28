@@ -3,13 +3,13 @@
 #include "include/Encoding.h"
 #include "include/Log.h"
 #include "include/Numbers.h"
-#include "Utils/Config/Config.h"
 
 #include <windows.h>
 #include <winhttp.h>
 
 #include <chrono>
 #include <format>
+#include <mutex>
 #include <string>
 
 namespace OSTPlatform::Http {
@@ -22,6 +22,10 @@ struct ParsedUrl {
     bool tls = false;
     bool valid = false;
 };
+
+std::mutex g_proxyMutex;
+std::string g_proxyUrl;
+std::string g_proxyBypass;
 
 ParsedUrl ParseUrl(const char* rawUrl) {
     ParsedUrl out;
@@ -70,6 +74,12 @@ std::wstring NormalizeProxyForWinHttp(std::string_view rawProxy) {
 
 } // namespace
 
+void SetProxy(const std::string& proxyUrl, const std::string& proxyBypass) {
+    std::lock_guard lock(g_proxyMutex);
+    g_proxyUrl = proxyUrl;
+    g_proxyBypass = proxyBypass;
+}
+
 Result Execute(const wchar_t* method,
                const char* url,
                const void* reqBody,
@@ -89,9 +99,15 @@ Result Execute(const wchar_t* method,
 
     auto t0 = std::chrono::steady_clock::now();
 
-    const Config::ProxySettings proxySettings = Config::GetProxySettings();
-    const std::wstring proxy = NormalizeProxyForWinHttp(proxySettings.url);
-    const std::wstring proxyBypass = Encoding::Utf8ToWide(proxySettings.bypass);
+    std::string proxyUrl;
+    std::string proxyBypassRaw;
+    {
+        std::lock_guard lock(g_proxyMutex);
+        proxyUrl = g_proxyUrl;
+        proxyBypassRaw = g_proxyBypass;
+    }
+    const std::wstring proxy = NormalizeProxyForWinHttp(proxyUrl);
+    const std::wstring proxyBypass = Encoding::Utf8ToWide(proxyBypassRaw);
 
     HINTERNET hSession = WinHttpOpen(
         L"OpenSteamTool/1.0",
