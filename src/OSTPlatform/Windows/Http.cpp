@@ -3,6 +3,7 @@
 #include "include/Encoding.h"
 #include "include/Log.h"
 #include "include/Numbers.h"
+#include "Utils/Config/Config.h"
 
 #include <windows.h>
 #include <winhttp.h>
@@ -57,6 +58,16 @@ ParsedUrl ParseUrl(const char* rawUrl) {
     return out;
 }
 
+std::wstring NormalizeProxyForWinHttp(std::string_view rawProxy) {
+    if (rawProxy.empty()) return {};
+
+    std::string proxy(rawProxy);
+    if (proxy.starts_with("http://")) {
+        proxy.erase(0, 7);
+    }
+    return Encoding::Utf8ToWide(proxy);
+}
+
 } // namespace
 
 Result Execute(const wchar_t* method,
@@ -78,10 +89,15 @@ Result Execute(const wchar_t* method,
 
     auto t0 = std::chrono::steady_clock::now();
 
-    HINTERNET hSession = WinHttpOpen(L"OpenSteamTool/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
+    const Config::ProxySettings proxySettings = Config::GetProxySettings();
+    const std::wstring proxy = NormalizeProxyForWinHttp(proxySettings.url);
+    const std::wstring proxyBypass = Encoding::Utf8ToWide(proxySettings.bypass);
+
+    HINTERNET hSession = WinHttpOpen(
+        L"OpenSteamTool/1.0",
+        proxy.empty() ? WINHTTP_ACCESS_TYPE_DEFAULT_PROXY : WINHTTP_ACCESS_TYPE_NAMED_PROXY,
+        proxy.empty() ? WINHTTP_NO_PROXY_NAME : proxy.c_str(),
+        proxyBypass.empty() ? WINHTTP_NO_PROXY_BYPASS : proxyBypass.c_str(),
         0);
     if (!hSession) {
         OSTP_LOG_WARN("{} - WinHttpOpen failed (error={})", url ? url : "", GetLastError());
