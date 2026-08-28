@@ -17,6 +17,7 @@ namespace {
         std::string logDir;
         std::vector<std::string> luaPaths;
         std::string remoteUrlTemplate;
+        ProxySettings proxy;
         bool statsEnableApi = true;
         InjectionSettings injection;
         CloudSettings cloud;
@@ -52,6 +53,8 @@ namespace {
         logDir                 = snapshot.logDir;
         luaPaths               = snapshot.luaPaths;
         remoteUrlTemplate      = snapshot.remoteUrlTemplate;
+        proxyUrl               = snapshot.proxy.url;
+        proxyBypass            = snapshot.proxy.bypass;
         statsEnableApi         = snapshot.statsEnableApi;
         injectEnabled          = snapshot.injection.enabled;
         injectLibraryX86       = snapshot.injection.libraryX86;
@@ -85,12 +88,13 @@ namespace {
             LOG_INFO("Config file not found, using defaults");
             ApplyManifestProvider(snapshot.manifestProvider);
             LoadResult result = ApplySnapshotLocked(snapshot);
-            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_template={}",
+            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_template={} proxy={}",
                      ManifestClient::ActiveProviderName(),
                      ToString(GetLogLevel()),
                      (uint32_t)GetLuaPaths().size(),
                      GetStatsEnableApi(),
-                     GetRemoteUrlTemplate().empty() ? "<default>" : GetRemoteUrlTemplate());
+                     GetRemoteUrlTemplate().empty() ? "<default>" : GetRemoteUrlTemplate(),
+                     GetProxySettings().url.empty() ? "<system/default>" : "<configured>");
             return result;
         }
 
@@ -141,6 +145,16 @@ namespace {
                 }
             }
 
+            // [proxy]
+            if (auto proxy = tbl["proxy"].as_table()) {
+                if (auto val = (*proxy)["url"].value<std::string>()) {
+                    snapshot.proxy.url = *val;
+                }
+                if (auto val = (*proxy)["bypass"].value<std::string>()) {
+                    snapshot.proxy.bypass = *val;
+                }
+            }
+
             // [stats]
             if (auto stats = tbl["stats"].as_table()) {
                 if (auto val = (*stats)["enable_api"].value<bool>()) {
@@ -168,12 +182,13 @@ namespace {
 
             ApplyManifestProvider(snapshot.manifestProvider);
             LoadResult result = ApplySnapshotLocked(snapshot);
-            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_template={}",
+            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} stats.enable_api={} remote.url_template={} proxy={}",
                      ManifestClient::ActiveProviderName(),
                      ToString(snapshot.logLevel),
                      (uint32_t)snapshot.luaPaths.size(),
                      snapshot.statsEnableApi,
-                     snapshot.remoteUrlTemplate.empty() ? "<default>" : snapshot.remoteUrlTemplate);
+                     snapshot.remoteUrlTemplate.empty() ? "<default>" : snapshot.remoteUrlTemplate,
+                     snapshot.proxy.url.empty() ? "<system/default>" : "<configured>");
             return result;
 
         } catch (const toml::parse_error& e) {
@@ -225,6 +240,11 @@ namespace {
     std::string GetRemoteUrlTemplate() {
         std::lock_guard lock(g_mutex);
         return remoteUrlTemplate;
+    }
+
+    ProxySettings GetProxySettings() {
+        std::lock_guard lock(g_mutex);
+        return {proxyUrl, proxyBypass};
     }
 
     InjectionSettings GetInjectionSettings() {
