@@ -34,6 +34,7 @@ namespace
     std::mutex g_removalMutex;
     std::vector<AppId_t> g_pendingRemovals;
     std::unordered_set<AppId_t> g_removedAppIds;
+    bool g_removalPipelineEnabled = false;
 
     // A full rebuild never lists removed_appid for apps still in the map
     // so re-assert our set after the snapshot is built.
@@ -93,15 +94,52 @@ namespace Hooks_SteamUI
 {
     void Install()
     {
-        ARM_CAPTURE_U(GetAppByID);
-        ARM_CAPTURE_U(MarkAppChange);
+        const Config::SteamUiHookSettings settings = Config::GetSteamUiHookSettings();
+        LOG_STEAMUI_INFO(
+            "SteamUI hook settings: enabled={} capture_get_app_by_id={} "
+            "capture_mark_app_change={} hook_fill_in_app_overview={} "
+            "hook_build_complete_app_overview_change={} hook_run_frame={}",
+            settings.enabled,
+            settings.captureGetAppById,
+            settings.captureMarkAppChange,
+            settings.hookFillInAppOverview,
+            settings.hookBuildCompleteAppOverviewChange,
+            settings.hookRunFrame);
 
-        RESOLVE_U(RepeatedFieldUint32_Add);
+        {
+            std::lock_guard<std::mutex> lock(g_removalMutex);
+            g_removalPipelineEnabled = settings.enabled &&
+                                       settings.captureGetAppById &&
+                                       settings.captureMarkAppChange &&
+                                       settings.hookRunFrame;
+        }
+
+        if (!settings.enabled) {
+            LOG_STEAMUI_WARN("SteamUI hooks disabled by [steamui].enabled=false");
+            return;
+        }
+
+        if (settings.captureGetAppById) {
+            ARM_CAPTURE_U(GetAppByID);
+        }
+        if (settings.captureMarkAppChange) {
+            ARM_CAPTURE_U(MarkAppChange);
+        }
+
+        if (settings.hookBuildCompleteAppOverviewChange) {
+            RESOLVE_U(RepeatedFieldUint32_Add);
+        }
 
         HOOK_BEGIN();
-        INSTALL_HOOK_U(FillInAppOverview);
-        INSTALL_HOOK_U(BuildCompleteAppOverviewChange);
-        INSTALL_HOOK_U(CSteamUIAppControllerRunFrame);
+        if (settings.hookFillInAppOverview) {
+            INSTALL_HOOK_U(FillInAppOverview);
+        }
+        if (settings.hookBuildCompleteAppOverviewChange) {
+            INSTALL_HOOK_U(BuildCompleteAppOverviewChange);
+        }
+        if (settings.hookRunFrame) {
+            INSTALL_HOOK_U(CSteamUIAppControllerRunFrame);
+        }
         HOOK_END();
     }
 
@@ -117,6 +155,9 @@ namespace Hooks_SteamUI
     void QueueRemoval(AppId_t appId)
     {
         std::lock_guard<std::mutex> lock(g_removalMutex);
+        if (!g_removalPipelineEnabled) {
+            return;
+        }
         g_pendingRemovals.push_back(appId);
     }
 
