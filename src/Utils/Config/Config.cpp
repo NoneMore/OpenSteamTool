@@ -19,6 +19,7 @@ namespace {
         std::vector<std::string> luaPaths;
         std::string remoteUrlTemplate;
         ProxySettings proxy;
+        SteamUiHookSettings steamui;
         bool statsEnableApi = true;
         InjectionSettings injection;
         CloudSettings cloud;
@@ -56,6 +57,12 @@ namespace {
         remoteUrlTemplate      = snapshot.remoteUrlTemplate;
         proxyUrl               = snapshot.proxy.url;
         proxyBypass            = snapshot.proxy.bypass;
+        steamUiEnabled         = snapshot.steamui.enabled;
+        steamUiCaptureGetAppById = snapshot.steamui.captureGetAppById;
+        steamUiCaptureMarkAppChange = snapshot.steamui.captureMarkAppChange;
+        steamUiHookFillInAppOverview = snapshot.steamui.hookFillInAppOverview;
+        steamUiHookBuildCompleteAppOverviewChange = snapshot.steamui.hookBuildCompleteAppOverviewChange;
+        steamUiHookRunFrame    = snapshot.steamui.hookRunFrame;
         statsEnableApi         = snapshot.statsEnableApi;
         injectEnabled          = snapshot.injection.enabled;
         injectLibraryX86       = snapshot.injection.libraryX86;
@@ -157,6 +164,22 @@ namespace {
                 }
             }
 
+            // [steamui] - startup-only controls; changing these requires a restart.
+            if (auto steamui = tbl["steamui"].as_table()) {
+                if (auto val = (*steamui)["enabled"].value<bool>())
+                    snapshot.steamui.enabled = *val;
+                if (auto val = (*steamui)["capture_get_app_by_id"].value<bool>())
+                    snapshot.steamui.captureGetAppById = *val;
+                if (auto val = (*steamui)["capture_mark_app_change"].value<bool>())
+                    snapshot.steamui.captureMarkAppChange = *val;
+                if (auto val = (*steamui)["hook_fill_in_app_overview"].value<bool>())
+                    snapshot.steamui.hookFillInAppOverview = *val;
+                if (auto val = (*steamui)["hook_build_complete_app_overview_change"].value<bool>())
+                    snapshot.steamui.hookBuildCompleteAppOverviewChange = *val;
+                if (auto val = (*steamui)["hook_run_frame"].value<bool>())
+                    snapshot.steamui.hookRunFrame = *val;
+            }
+
             // [stats]
             if (auto stats = tbl["stats"].as_table()) {
                 if (auto val = (*stats)["enable_api"].value<bool>()) {
@@ -247,6 +270,18 @@ namespace {
     ProxySettings GetProxySettings() {
         std::lock_guard lock(g_mutex);
         return {proxyUrl, proxyBypass};
+    }
+
+    SteamUiHookSettings GetSteamUiHookSettings() {
+        std::lock_guard lock(g_mutex);
+        return {
+            steamUiEnabled,
+            steamUiCaptureGetAppById,
+            steamUiCaptureMarkAppChange,
+            steamUiHookFillInAppOverview,
+            steamUiHookBuildCompleteAppOverviewChange,
+            steamUiHookRunFrame,
+        };
     }
 
     InjectionSettings GetInjectionSettings() {
