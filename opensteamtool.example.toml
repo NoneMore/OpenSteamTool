@@ -67,6 +67,18 @@ timeout_recv_ms    = 10000
 # The special token <local> bypasses proxying for host names without a dot.
 # bypass = "localhost;127.0.0.1;<local>"
 
+[steamui]
+# Startup-only SteamUI hook controls. These are intended for isolating a
+# Steam-client update that changes internal SteamUI functions/ABI. Changing
+# this section requires a full Steam restart; hot reload does not rewire hooks.
+enabled = true
+# Disable one item at a time to bisect a SteamUI crash. All default to true.
+# capture_get_app_by_id = true
+# capture_mark_app_change = true
+# hook_fill_in_app_overview = true
+# hook_build_complete_app_overview_change = true
+# hook_run_frame = true
+
 [stats]
 # Automatically query https://stats.opensteamtool.com/{appid} for a recommended
 # SteamID when no Lua setStat(appid, "steamid") override exists.
