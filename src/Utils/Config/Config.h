@@ -15,6 +15,11 @@ namespace Config {
         uint32_t recv    = 10000;
     };
 
+    struct ProxySettings {
+        std::string url;
+        std::string bypass;
+    };
+
     struct InjectionSettings {
         bool enabled = false;
         std::string libraryX86;
@@ -38,6 +43,7 @@ namespace Config {
     std::string GetLogDir();
     std::vector<std::string> GetLuaPaths();
     std::string GetRemoteUrlTemplate();
+    ProxySettings GetProxySettings();
     InjectionSettings GetInjectionSettings();
     CloudSettings GetCloudSettings();
     bool GetStatsEnableApi();
@@ -59,6 +65,10 @@ namespace Config {
 
     // [remote]
     inline std::string remoteUrlTemplate;
+
+    // [proxy] - optional proxy for OpenSteamTool outbound HTTP requests.
+    inline std::string proxyUrl;
+    inline std::string proxyBypass;
 
     // [stats]
     inline bool statsEnableApi = true;

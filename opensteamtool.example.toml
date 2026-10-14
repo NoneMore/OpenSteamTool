@@ -56,6 +56,17 @@ timeout_connect_ms = 5000
 timeout_send_ms    = 10000
 timeout_recv_ms    = 10000
 
+[proxy]
+# Optional explicit HTTP proxy used by all OpenSteamTool outbound HTTP requests,
+# including manifest providers, metadata downloads, stats API and Lua http_get/http_post.
+# Leave url unset or empty to keep WinHTTP's default/system proxy behavior.
+# Examples:
+# url = "http://127.0.0.1:7890"
+# url = "127.0.0.1:7890"
+# Optional WinHTTP bypass list; entries are separated by semicolons.
+# The special token <local> bypasses proxying for host names without a dot.
+# bypass = "localhost;127.0.0.1;<local>"
+
 [stats]
 # Automatically query https://stats.opensteamtool.com/{appid} for a recommended
 # SteamID when no Lua setStat(appid, "steamid") override exists.

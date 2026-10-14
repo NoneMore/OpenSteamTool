@@ -12,6 +12,10 @@ namespace OSTPlatform::Http {
         bool ok = false;
     };
 
+    // Configure an explicit proxy for subsequent HTTP requests. An empty proxy URL
+    // restores WinHTTP's default/system proxy behavior.
+    void SetProxy(const std::string& proxyUrl, const std::string& proxyBypass = {});
+
     Result Execute(const wchar_t* method,
                    const char* url,
                    const void* reqBody = nullptr,
