@@ -20,6 +20,15 @@ namespace Config {
         std::string bypass;
     };
 
+    struct SteamUiHookSettings {
+        bool enabled = true;
+        bool captureGetAppById = true;
+        bool captureMarkAppChange = true;
+        bool hookFillInAppOverview = true;
+        bool hookBuildCompleteAppOverviewChange = true;
+        bool hookRunFrame = true;
+    };
+
     struct InjectionSettings {
         bool enabled = false;
         std::string libraryX86;
@@ -44,6 +53,7 @@ namespace Config {
     std::vector<std::string> GetLuaPaths();
     std::string GetRemoteUrlTemplate();
     ProxySettings GetProxySettings();
+    SteamUiHookSettings GetSteamUiHookSettings();
     InjectionSettings GetInjectionSettings();
     CloudSettings GetCloudSettings();
     bool GetStatsEnableApi();
@@ -69,6 +79,14 @@ namespace Config {
     // [proxy] - optional proxy for OpenSteamTool outbound HTTP requests.
     inline std::string proxyUrl;
     inline std::string proxyBypass;
+
+    // [steamui] - startup-only SteamUI hook controls used for safe isolation.
+    inline bool steamUiEnabled = true;
+    inline bool steamUiCaptureGetAppById = true;
+    inline bool steamUiCaptureMarkAppChange = true;
+    inline bool steamUiHookFillInAppOverview = true;
+    inline bool steamUiHookBuildCompleteAppOverviewChange = true;
+    inline bool steamUiHookRunFrame = true;
 
     // [stats]
     inline bool statsEnableApi = true;

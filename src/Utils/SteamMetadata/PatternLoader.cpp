@@ -75,26 +75,56 @@ static bool ParseSig(const std::string& str,
     return !bytes.empty();
 }
 
-static void* ScanModule(OSTPlatform::DynamicLibrary::ModuleHandle module,
-                        const std::vector<uint8_t>& bytes,
-                        const std::vector<uint8_t>& mask)
+static bool MatchesBytes(const uint8_t* address,
+                         const std::vector<uint8_t>& bytes,
+                         const std::vector<uint8_t>& mask)
+{
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (mask[i] && address[i] != bytes[i]) return false;
+    }
+    return true;
+}
+
+static bool MatchesModuleRva(OSTPlatform::DynamicLibrary::ModuleHandle module,
+                             uintptr_t rva,
+                             const std::vector<uint8_t>& bytes,
+                             const std::vector<uint8_t>& mask)
 {
     const auto image = OSTPlatform::Memory::GetModuleImage(module);
-    if (!image) return nullptr;
+    if (!image || bytes.empty()) return false;
+
+    const size_t size = image->size;
+    const size_t patLen = bytes.size();
+    if (rva > size || patLen > size - rva) return false;
+
+    return MatchesBytes(image->base + rva, bytes, mask);
+}
+
+struct ScanResult {
+    void* address = nullptr;
+    size_t matches = 0;
+};
+
+static ScanResult ScanModule(OSTPlatform::DynamicLibrary::ModuleHandle module,
+                             const std::vector<uint8_t>& bytes,
+                             const std::vector<uint8_t>& mask)
+{
+    ScanResult result;
+    const auto image = OSTPlatform::Memory::GetModuleImage(module);
+    if (!image) return result;
 
     auto* base = image->base;
     size_t size = image->size;
     size_t patLen = bytes.size();
-    if (size < patLen) return nullptr;
+    if (patLen == 0 || size < patLen) return result;
 
     for (size_t i = 0; i <= size - patLen; ++i) {
-        bool found = true;
-        for (size_t j = 0; j < patLen; ++j) {
-            if (mask[j] && base[i + j] != bytes[j]) { found = false; break; }
-        }
-        if (found) return base + i;
+        if (!MatchesBytes(base + i, bytes, mask)) continue;
+
+        if (result.matches == 0) result.address = base + i;
+        ++result.matches;
     }
-    return nullptr;
+    return result;
 }
 
 // ---- TOML pattern parser ----
@@ -234,33 +264,61 @@ void* FindPattern(OSTPlatform::DynamicLibrary::ModuleHandle module, const char* 
 
     const PatternEntry& entry = entryIt->second;
 
-    // Priority 1: RVA direct offset
+    std::vector<uint8_t> bytes, mask;
+    const bool hasSig = !entry.sig.empty();
+    if (hasSig && !ParseSig(entry.sig, bytes, mask)) {
+        LOG_WARN("PatternLoader: malformed sig for '{}': '{}'", funcName, entry.sig);
+        g_missingFunctions.emplace_back(funcName);
+        return nullptr;
+    }
+
+    // Prefer the supplied RVA, but when a signature is available verify that
+    // the bytes at the RVA actually match before returning an executable
+    // address. This is especially important for INT3 capture sites: a stale RVA
+    // would otherwise patch an unrelated instruction before any hook runs.
     if (entry.rva != 0) {
         void* addr = reinterpret_cast<void*>(
             reinterpret_cast<uintptr_t>(module) + entry.rva);
-        LOG_DEBUG("PatternLoader: {} resolved via RVA 0x{:X}", funcName, entry.rva);
-        return addr;
+
+        if (!hasSig) {
+            LOG_WARN("PatternLoader: {} resolved via unverified RVA 0x{:X} (no sig)",
+                     funcName, entry.rva);
+            return addr;
+        }
+
+        if (MatchesModuleRva(module, entry.rva, bytes, mask)) {
+            LOG_DEBUG("PatternLoader: {} resolved via verified RVA 0x{:X}",
+                      funcName, entry.rva);
+            return addr;
+        }
+
+        LOG_WARN("PatternLoader: RVA 0x{:X} for '{}' does not match its signature; "
+                 "scanning module instead",
+                 entry.rva, funcName);
     }
 
-    // Priority 2: byte-signature scan
-    if (!entry.sig.empty()) {
-        std::vector<uint8_t> bytes, mask;
-        if (ParseSig(entry.sig, bytes, mask)) {
-            void* addr = ScanModule(module, bytes, mask);
-            if (addr) {
-                uintptr_t rva = reinterpret_cast<uintptr_t>(addr) -
-                                reinterpret_cast<uintptr_t>(module);
-                LOG_DEBUG("PatternLoader: {} resolved via sig @ RVA 0x{:X}",
-                          funcName, rva);
-                return addr;
-            }
+    // Signature fallback. Require a unique match so a broad/stale signature
+    // cannot silently redirect a detour (or INT3 capture) to an arbitrary site.
+    if (hasSig) {
+        ScanResult scan = ScanModule(module, bytes, mask);
+        if (scan.matches == 1 && scan.address) {
+            uintptr_t rva = reinterpret_cast<uintptr_t>(scan.address) -
+                            reinterpret_cast<uintptr_t>(module);
+            LOG_WARN("PatternLoader: {} resolved via unique sig @ RVA 0x{:X}{}",
+                     funcName,
+                     rva,
+                     entry.rva != 0 ? " after RVA validation failed" : "");
+            return scan.address;
+        }
+        if (scan.matches == 0) {
             LOG_WARN("PatternLoader: sig scan miss for '{}' (pattern parsed OK, "
                      "no match in module image)", funcName);
         } else {
-            LOG_WARN("PatternLoader: malformed sig for '{}': '{}'",
-                     funcName, entry.sig);
+            LOG_WARN("PatternLoader: sig for '{}' is ambiguous ({} matches); "
+                     "refusing to choose a target",
+                     funcName, scan.matches);
         }
-    } else {
+    } else if (entry.rva == 0) {
         LOG_WARN("PatternLoader: entry for '{}' has neither rva nor sig", funcName);
     }
 

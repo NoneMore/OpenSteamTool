@@ -6,6 +6,7 @@
 #include "Utils/Tickets/AppTicket.h"
 #include "Utils/Support/FnvHash.h"
 #include "Utils/CloudRedirect/CloudRedirectHost.h"
+#include "OSTPlatform/include/Memory.h"
 #include <chrono>
 #include <cstring>
 #include <deque>
@@ -79,6 +80,49 @@ namespace {
         pBody  = data + off;
         cbBody = size - off;
         return true;
+    }
+
+    // ── CNetPacket layout ──────────────────────────────────────
+    // Older Steam builds: m_pubData is at +0x08 (right after m_hConnection).
+    // Newer builds (seen in 1791918634): 8 more bytes precede the same fields,
+    // so m_pubData/m_cubData/m_cRef/m_pubNetworkBuffer/m_pNext all sit at +8.
+    // All code below is written against the old struct, so RecvPkt converts the
+    // raw pointer into a "fields" pointer first (PacketFields) and hands the
+    // raw pointer back to Steam (PacketRaw).
+    //
+    // Validate both candidate layouts against the packet header before touching
+    // any fields. If neither (or both) look valid, fail closed and pass through.
+    thread_local int g_NetPacketBias = 0;   // bytes between raw CNetPacket* and field view
+
+    inline bool IsValidPacketFields(CNetPacket* packet)
+    {
+        if (!packet || !OSTPlatform::Memory::IsReadable(packet->m_pubData, sizeof(MsgHdr)))
+            return false;
+
+        EMsg eMsg;
+        const uint8 *pBody, *pHdr;
+        uint32 cbBody, cbHdr;
+        return UnpackRaw(packet->m_pubData, packet->m_cubData,
+                         eMsg, pHdr, cbHdr, pBody, cbBody);
+    }
+
+    inline CNetPacket* PacketFields(CNetPacket* raw)
+    {
+        CNetPacket* oldFields = raw;
+        CNetPacket* newFields = reinterpret_cast<CNetPacket*>(reinterpret_cast<uint8*>(raw) + 8);
+        const bool oldLayout = IsValidPacketFields(oldFields);
+        const bool newLayout = IsValidPacketFields(newFields);
+
+        if (oldLayout == newLayout)
+            return nullptr;
+
+        g_NetPacketBias = oldLayout ? 0 : 8;
+        return oldLayout ? oldFields : newFields;
+    }
+
+    inline CNetPacket* PacketRaw(CNetPacket* fields)
+    {
+        return reinterpret_cast<CNetPacket*>(reinterpret_cast<uint8*>(fields) - g_NetPacketBias);
     }
 
     // ── Incoming: replace header and/or body (ring-buffer pool) ──
@@ -1316,15 +1360,23 @@ namespace {
         return result;
     }
 
-    HOOK_FUNC(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
+    HOOK_FUNC(RecvPkt, void*, void* pThis, CNetPacket* pRawPacket)
     {
+        // pPacket is the field view; Steam must always be given pRawPacket.
+        CNetPacket* pPacket = PacketFields(pRawPacket);
+
+        // Unknown/ambiguous layout or non-protobuf packet: hand it to Steam
+        // untouched rather than mutate fields we cannot trust.
+        if (!pPacket)
+            return oRecvPkt(pThis, pRawPacket);
+
         Hooks_NetPacket_RichPresence::TryInject(
             pThis, pPacket,
-            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
+            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, PacketRaw(pP)) != nullptr; });
 
         Hooks_NetPacket_Cloud::Drain(
             pThis, pPacket,
-            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, pP) != nullptr; });
+            [](void* pT, CNetPacket* pP) -> bool { return oRecvPkt(pT, PacketRaw(pP)) != nullptr; });
 
         EMsg eMsg;
         const uint8 *pBody, *pHdr;
@@ -1350,7 +1402,7 @@ namespace {
             }
         }
 
-        return oRecvPkt(pThis, pPacket);
+        return oRecvPkt(pThis, pRawPacket);
     }
 
 } // anonymous namespace

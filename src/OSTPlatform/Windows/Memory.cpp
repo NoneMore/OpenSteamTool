@@ -20,6 +20,38 @@ std::optional<ModuleImage> GetModuleImage(DynamicLibrary::ModuleHandle module) {
     };
 }
 
+bool IsReadable(const void* address, size_t size) {
+    if (!address || size == 0) return false;
+
+    const auto begin = reinterpret_cast<uintptr_t>(address);
+    const auto end   = begin + size;
+    if (end < begin) return false;
+
+    // A range may span several regions; walk them all.
+    for (uintptr_t cur = begin; cur < end; ) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<const void*>(cur), &mbi, sizeof(mbi))) return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD)) return false;
+
+        switch (mbi.Protect & 0xFF) {
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            break;
+        default:
+            return false;
+        }
+
+        const auto next = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (next <= cur) return false;
+        cur = next;
+    }
+    return true;
+}
+
 bool WriteExecutableByte(void* target, uint8_t value) {
     if (!target) {
         OSTP_LOG_WARN("WriteExecutableByte: target is null");
