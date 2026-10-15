@@ -90,17 +90,34 @@ namespace {
     // raw pointer into a "fields" pointer first (PacketFields) and hands the
     // raw pointer back to Steam (PacketRaw).
     //
-    // Layout is told apart by the qword at +0x08: in the old layout it is the
-    // data pointer (readable memory); in the new one it is part of the extra
-    // header and never a valid pointer (observed: 0x00000000ffffffff and similar).
-    int g_NetPacketBias = 0;   // bytes between raw CNetPacket* and field view
+    // Validate both candidate layouts against the packet header before touching
+    // any fields. If neither (or both) look valid, fail closed and pass through.
+    thread_local int g_NetPacketBias = 0;   // bytes between raw CNetPacket* and field view
+
+    inline bool IsValidPacketFields(CNetPacket* packet)
+    {
+        if (!packet || !OSTPlatform::Memory::IsReadable(packet->m_pubData, sizeof(MsgHdr)))
+            return false;
+
+        EMsg eMsg;
+        const uint8 *pBody, *pHdr;
+        uint32 cbBody, cbHdr;
+        return UnpackRaw(packet->m_pubData, packet->m_cubData,
+                         eMsg, pHdr, cbHdr, pBody, cbBody);
+    }
 
     inline CNetPacket* PacketFields(CNetPacket* raw)
     {
-        const auto* qwords = reinterpret_cast<const uintptr_t*>(raw);
-        const bool oldLayout = OSTPlatform::Memory::IsReadable(reinterpret_cast<const void*>(qwords[1]), 1);
+        CNetPacket* oldFields = raw;
+        CNetPacket* newFields = reinterpret_cast<CNetPacket*>(reinterpret_cast<uint8*>(raw) + 8);
+        const bool oldLayout = IsValidPacketFields(oldFields);
+        const bool newLayout = IsValidPacketFields(newFields);
+
+        if (oldLayout == newLayout)
+            return nullptr;
+
         g_NetPacketBias = oldLayout ? 0 : 8;
-        return reinterpret_cast<CNetPacket*>(reinterpret_cast<uint8*>(raw) + g_NetPacketBias);
+        return oldLayout ? oldFields : newFields;
     }
 
     inline CNetPacket* PacketRaw(CNetPacket* fields)
@@ -1348,9 +1365,9 @@ namespace {
         // pPacket is the field view; Steam must always be given pRawPacket.
         CNetPacket* pPacket = PacketFields(pRawPacket);
 
-        // Unknown layout / empty packet: hand it to Steam untouched rather
-        // than dereference a pointer we cannot trust.
-        if (!OSTPlatform::Memory::IsReadable(pPacket->m_pubData, sizeof(MsgHdr)))
+        // Unknown/ambiguous layout or non-protobuf packet: hand it to Steam
+        // untouched rather than mutate fields we cannot trust.
+        if (!pPacket)
             return oRecvPkt(pThis, pRawPacket);
 
         Hooks_NetPacket_RichPresence::TryInject(
